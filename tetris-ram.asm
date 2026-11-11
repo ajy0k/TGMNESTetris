@@ -164,7 +164,7 @@ currentPpuCtrl:	.res 1	; $00FF
 stack:	.res $FF	; $0100
 .res 1
 oamStaging:	.res $100	; $0200
-.res 240
+.res 240 ; $0300-$03EF: TGM ruleset variables (see tgm.asm)
 statsByType:	.res $0E	; $03F0
 .res 2
 playfield:	.res $C8	; $0400

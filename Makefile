@@ -11,9 +11,21 @@ else
 	SHA1SUM := sha1sum
 endif
 
+# Use a system-wide cc65 (e.g. `brew install cc65`) if one is installed,
+# otherwise build it from the cc65 submodule.
+SYSTEM_CA65 := $(shell command -v ca65 2>/dev/null)
+SYSTEM_LD65 := $(shell command -v ld65 2>/dev/null)
+ifneq (,$(and $(SYSTEM_CA65),$(SYSTEM_LD65)))
+CA65 := $(SYSTEM_CA65)
+LD65 := $(SYSTEM_LD65)
+CC65_DEPS :=
+else
 CA65 := $(cc65Path)/bin/ca65
 LD65 := $(cc65Path)/bin/ld65
-nesChrEncode := python3 tools/nes-util/nes_chr_encode.py
+CC65_DEPS := $(CA65) $(LD65)
+endif
+PYTHON ?= python3
+nesChrEncode := $(PYTHON) tools/nes-util/nes_chr_encode.py
 
 tetris.nes: tetris.o tetris-ram.o
 
@@ -35,13 +47,15 @@ compare: $(tetris)
 clean:
 	rm -f  $(tetris_obj) $(tetris) *.d tetris.dbg tetris.lbl gfx/*.chr
 	$(MAKE) clean -C tools/cTools/
-	$(MAKE) clean -C cc65/
+	-$(MAKE) clean -C cc65/
 
+ifneq (,$(CC65_DEPS))
 $(CA65): cc65/src/ca65/*.c
 	$(MAKE) ca65 -C cc65/
 
 $(LD65): cc65/src/ld65/*.c
 	$(MAKE) ld65 -C cc65/
+endif
 
 tools:
 	$(MAKE) -C tools/cTools/
@@ -54,7 +68,7 @@ $(info $(shell $(MAKE) -C tools/cTools/))
 endif
 
 %.o: dep = $(shell tools/cTools/scan_includes $(@D)/$*.asm)
-$(tetris_obj): %.o: %.asm $$(dep) $(CA65) $(LD65)
+$(tetris_obj): %.o: %.asm $$(dep) $(CC65_DEPS)
 		$(CA65) $(CAFLAGS) $*.asm -o $@
 
 %: %.cfg
@@ -63,6 +77,7 @@ $(tetris_obj): %.o: %.asm $$(dep) $(CA65) $(LD65)
 
 
 %.chr: %.png
+		rm -f $@
 		$(nesChrEncode) $< $@
 
 

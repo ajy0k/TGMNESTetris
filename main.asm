@@ -441,6 +441,7 @@ branchOnGameMode:
         .addr   gameMode_startDemo
 gameModeState_updatePlayer1:
         jsr     makePlayer1Active
+        jsr     tgmPreFrame
         jsr     branchOnPlayStatePlayer1
         jsr     stageSpriteForCurrentPiece
         jsr     savePlayer1State
@@ -475,17 +476,18 @@ branchOnPlayStatePlayer1:
         lda     playState
         jsr     switch_s_plus_2a
         .addr   playState_unassignOrientationId
-        .addr   playState_playerControlsActiveTetrimino
+        .addr   playState_tgmActive             ; TGM: was playState_playerControlsActiveTetrimino
         .addr   playState_lockTetrimino
         .addr   playState_checkForCompletedRows
         .addr   playState_noop
-        .addr   playState_updateLinesAndStatistics
-        .addr   playState_bTypeGoalCheck
+        .addr   playState_tgmScore              ; TGM: was playState_updateLinesAndStatistics
+        .addr   playState_tgmCheckFinish        ; TGM: was playState_bTypeGoalCheck
         .addr   playState_receiveGarbage
-        .addr   playState_spawnNextTetrimino
+        .addr   playState_tgmSpawn              ; TGM: was playState_spawnNextTetrimino
         .addr   playState_noop
         .addr   playState_updateGameOverCurtain
         .addr   playState_incrementPlayState
+        .addr   playState_tgmWin                ; TGM: level 999 / credit roll finished
 playState_playerControlsActiveTetrimino:
         jsr     shift_tetrimino
         jsr     rotate_tetrimino
@@ -1137,6 +1139,8 @@ gameModeState_initGameBackground:
         jsr     twoDigsToPPU
         lda     highScoreScoresB+2
         jsr     twoDigsToPPU
+        jmp     gameModeState_initGameBackground_finish ; TGM: B-TYPE (20G) has no height box
+
         ldx     #$00
 @nextPpuAddress:
         lda     game_typeb_nametable_patch,x
@@ -1199,7 +1203,7 @@ gameModeState_initGameState:
         sta     statsByType-1,x
         dex
         bne     @initStatsByType
-        lda     #$05
+        lda     #$04                    ; TGM: 3-wide pieces spawn left of centre
         sta     player1_tetriminoX
         sta     player2_tetriminoX
         lda     #$00
@@ -1239,6 +1243,7 @@ gameModeState_initGameState:
         lda     #INITIAL_AUTOREPEAT_Y
         sta     player1_autorepeatY
         sta     player2_autorepeatY
+        jsr     tgmInitGame
         jsr     chooseNextTetrimino
         sta     player1_currentPiece
         sta     player2_currentPiece
@@ -1249,13 +1254,8 @@ gameModeState_initGameState:
         jsr     chooseNextTetrimino
         sta     nextPiece
         sta     twoPlayerPieceDelayPiece
-        lda     gameType
-        beq     @skipTypeBInit
-        lda     #$25
-        sta     player1_lines
-        sta     player2_lines
-@skipTypeBInit:
-        lda     #RENDER_STATS+RENDER_SCORE+RENDER_LEVEL+RENDER_LINES
+        ; TGM: B-TYPE is 20G mode, no 25 line goal
+        lda     #RENDER_STATS+RENDER_SCORE+RENDER_LEVEL+RENDER_LINES+RENDER_GRADE
         sta     outOfDateRenderFlags
         jsr     updateAudioWaitForNmiAndResetOamStaging
         jsr     initPlayfieldIfTypeB
@@ -1337,9 +1337,7 @@ savePlayer2State:
         rts
 
 initPlayfieldIfTypeB:
-        lda     gameType
-        bne     initPlayfieldForTypeB
-        jmp     endTypeBInit
+        jmp     endTypeBInit            ; TGM: no B-type garbage
 
 initPlayfieldForTypeB:
         lda     #$0C
@@ -1670,6 +1668,7 @@ stageSpriteForCurrentPiece:
         asl     a
         asl     a
         asl     a
+        clc                             ; TGM: X can be -1 (vertical I in column 0)
         adc     #$60
         sta     generalCounter3 ; x position of center block
         lda     numberOfPlayers
@@ -1758,31 +1757,34 @@ stageSpriteForCurrentPiece:
 
 orientationTable:
         ; y offset, tile ID, x offset per mino per orientation
-        .byte    0, tile1,-1, 0, tile1, 0, 0, tile1, 1,-1, tile1, 0 ; $00 t up
+        ; TGM: Arika Rotation System shapes, relative to the centre of the
+        ; 3x3 rotation box. Same orientation ids as the original; B (even
+        ; rotationTable entries) turns counter-clockwise, A clockwise.
+        .byte    0, tile1, 0, 1, tile1,-1, 1, tile1, 0, 1, tile1, 1 ; $00 t up
         .byte   -1, tile1, 0, 0, tile1, 0, 0, tile1, 1, 1, tile1, 0 ; $01 t right
         .byte    0, tile1,-1, 0, tile1, 0, 0, tile1, 1, 1, tile1, 0 ; $02 t down (spawn)
         .byte   -1, tile1, 0, 0, tile1,-1, 0, tile1, 0, 1, tile1, 0 ; $03 t left
 
         .byte   -1, tile3, 0, 0, tile3, 0, 1, tile3,-1, 1, tile3, 0 ; $04 j left
-        .byte   -1, tile3,-1, 0, tile3,-1, 0, tile3, 0, 0, tile3, 1 ; $05 j up
+        .byte    0, tile3,-1, 1, tile3,-1, 1, tile3, 0, 1, tile3, 1 ; $05 j up
         .byte   -1, tile3, 0,-1, tile3, 1, 0, tile3, 0, 1, tile3, 0 ; $06 j right
         .byte    0, tile3,-1, 0, tile3, 0, 0, tile3, 1, 1, tile3, 1 ; $07 j down (spawn)
 
         .byte    0, tile2,-1, 0, tile2, 0, 1, tile2, 0, 1, tile2, 1 ; $08 z horizontal (spawn)
         .byte   -1, tile2, 1, 0, tile2, 0, 0, tile2, 1, 1, tile2, 0 ; $09 z vertical
 
-        .byte    0, tile1,-1, 0, tile1, 0, 1, tile1,-1, 1, tile1, 0 ; $0A o (spawn)
+        .byte    0, tile1, 0, 0, tile1, 1, 1, tile1, 0, 1, tile1, 1 ; $0A o (spawn)
 
         .byte    0, tile3, 0, 0, tile3, 1, 1, tile3,-1, 1, tile3, 0 ; $0B s horizontal (spawn)
-        .byte   -1, tile3, 0, 0, tile3, 0, 0, tile3, 1, 1, tile3, 1 ; $0C s vertical
+        .byte   -1, tile3,-1, 0, tile3,-1, 0, tile3, 0, 1, tile3, 0 ; $0C s vertical
 
         .byte   -1, tile2, 0, 0, tile2, 0, 1, tile2, 0, 1, tile2, 1 ; $0D l right
         .byte    0, tile2,-1, 0, tile2, 0, 0, tile2, 1, 1, tile2,-1 ; $0E l down (spawn)
         .byte   -1, tile2,-1,-1, tile2, 0, 0, tile2, 0, 1, tile2, 0 ; $0F l left
-        .byte   -1, tile2, 1, 0, tile2,-1, 0, tile2, 0, 0, tile2, 1 ; $10 l up
+        .byte    0, tile2, 1, 1, tile2,-1, 1, tile2, 0, 1, tile2, 1 ; $10 l up
 
-        .byte   -2, tile1, 0,-1, tile1, 0, 0, tile1, 0, 1, tile1, 0 ; $11 i vertical
-        .byte    0, tile1,-2, 0, tile1,-1, 0, tile1, 0, 0, tile1, 1 ; $12 i horizontal (spawn)
+        .byte   -1, tile1, 1, 0, tile1, 1, 1, tile1, 1, 2, tile1, 1 ; $11 i vertical
+        .byte    0, tile1,-1, 0, tile1, 0, 0, tile1, 1, 0, tile1, 2 ; $12 i horizontal (spawn)
 
         ; Hidden orientation used during line clear animation and game over curtain
         .byte    0, tileHidden, 0, 0, tileHidden, 0, 0, tileHidden, 0, 0, tileHidden, 0 ; $13
@@ -2534,6 +2536,7 @@ render_mode_play_and_demo:
         lda     vramRow
         sta     player2_vramRow
 @renderLines:
+        jsr     tgmRenderHud            ; TGM: grade + timer (only on otherwise quiet frames)
         lda     outOfDateRenderFlags
         and     #RENDER_LINES
         beq     @renderLevel
@@ -2580,14 +2583,13 @@ render_mode_play_and_demo:
         lda     numberOfPlayers
         cmp     #$02
         beq     @renderScore
-        ldx     player1_levelNumber
-        lda     levelDisplayTable,x
-        sta     generalCounter
-        lda     #$22
+        lda     #$22                    ; TGM: three digit level
         sta     PPUADDR
-        lda     #$BA
+        lda     #$B9
         sta     PPUADDR
-        lda     generalCounter
+        lda     tgmLevelHi
+        sta     PPUDATA
+        lda     tgmLevel
         jsr     twoDigsToPPU
         jsr     updatePaletteForLevel
         lda     outOfDateRenderFlags
@@ -2962,8 +2964,7 @@ chooseNextTetrimino:
         rts
 
 pickRandomTetrimino:
-        jsr     @realStart
-        rts
+        jmp     tgmPickPiece            ; TGM randomizer
 
 @realStart:
 .if NWC = 1
@@ -3167,14 +3168,7 @@ playState_updateGameOverCurtain:
         lda     numberOfPlayers
         cmp     #$02
         beq     @exitGame
-        lda     player1_score+2
-        cmp     #$03
-        bcc     @checkForStartButton
-        lda     #ENDING_SLEEP_TIME_1
-        jsr     sleep_for_a_vblanks
-        jsr     endingAnimation
-        jmp     @exitGame
-
+        ; TGM: the rocket ending is now the reward for clearing level 999
 @checkForStartButton:
         lda     newlyPressedButtons_player1
         cmp     #BUTTON_START
@@ -3194,7 +3188,7 @@ playState_checkForCompletedRows:
 @updatePlayfieldComplete:
         lda     tetriminoY
         sec
-        sbc     #$02
+        sbc     #$01                    ; TGM: ARS pieces span y-1 .. y+2
         bpl     @yInRange
         lda     #$00
 @yInRange:
@@ -3271,7 +3265,10 @@ playState_checkForCompletedRows:
 @skipTetrisSoundEffect:
         inc     playState
         lda     completedLines
-        bne     @ret
+        beq     @noLines
+        jmp     tgmAddLineClearDelay
+
+@noLines:
         inc     playState
         lda     #$07
         sta     soundEffectSlot1Init
@@ -3983,8 +3980,7 @@ render_mode_ending_animation:
         jsr     twoDigsToPPU
         lda     player1_score
         jsr     twoDigsToPPU
-        lda     gameType
-        beq     L9FE9
+        jmp     L9FE9                   ; TGM: no B-type bonus display
         lda     #$20
         sta     PPUADDR
         lda     #$B0
@@ -4078,10 +4074,11 @@ showHighScores_real:
         lda     #$FF
         sta     PPUDATA
         ldy     generalCounter2
-        lda     highScoreLevels,y
-        tax
-        lda     byteToBcdTable,x
-        jsr     twoDigsToPPU
+        ldx     highScoreLevels,y       ; TGM: show the grade
+        lda     tgmGradeTile1,x
+        sta     PPUDATA
+        lda     tgmGradeTile2,x
+        sta     PPUDATA
         inc     generalCounter2
         lda     generalCounter2
         cmp     #$03
@@ -4200,7 +4197,7 @@ adjustHighScores:
         lda     player1_score
         sta     highScoreScoresA,x
         ldx     highScoreEntryRawPos
-        lda     player1_levelNumber
+        lda     tgmGrade                ; TGM: the "GR" column holds the grade
         sta     highScoreLevels,x
         jmp     highScoreEntryScreen
 
@@ -5195,29 +5192,13 @@ endingAnimationA:
         rts
 
 selectEndingScreen:
-; score+2 is compared to $03 in @curtainFinished
-        lda     #$00 ; >= 30,000
+        jsr     tgmDrawEndingText
+        ; TGM: the rocket depends on the grade; GM gets the cathedral
+        ldx     tgmGrade
+        lda     tgmGradeToEnding,x
         sta     ending
-        lda     player1_score+2
-        cmp     #$05
+        cmp     #$04
         bcc     ending_selected
-        lda     #$01 ; >= 50,000
-        sta     ending
-        lda     player1_score+2
-        cmp     #$07
-        bcc     ending_selected
-        lda     #$02 ; >= 70,000
-        sta     ending
-        lda     player1_score+2
-        cmp     #$10
-        bcc     ending_selected
-        lda     #$03 ; >= 100,000
-        sta     ending
-        lda     player1_score+2
-        cmp     #$12
-        bcc     ending_selected
-        lda     #$04 ; >= 120,000
-        sta     ending
         lda     #>ending_patchToPpu_typeAOver120k
         sta     patchToPpuAddr+1
         lda     #<ending_patchToPpu_typeAOver120k
@@ -5780,13 +5761,14 @@ defaultHighScoresTable:
         .byte   $00,$10,$00 ;Game B 2nd Entry Score, 1000
         .byte   $00,$05,$00 ;Game B 3rd Entry Score, 500
         .byte   $00,$00,$00 ;unused fourth score
-        .byte   $09 ;Game A 1st Entry Level
-        .byte   $05 ;Game A 2nd Entry Level
-        .byte   $00 ;Game A 3nd Entry Level
+        ; TGM: grades (0 = 9, 9 = S1)
+        .byte   $07 ;Game A 1st Entry Grade (2)
+        .byte   $06 ;Game A 2nd Entry Grade (3)
+        .byte   $05 ;Game A 3nd Entry Grade (4)
         .byte   $00 ;unused fourth level
-        .byte   $09 ;Game B 1st Entry Level
-        .byte   $05 ;Game B 2nd Entry Level
-        .byte   $00 ;Game B 3rd Entry Level
+        .byte   $04 ;Game B 1st Entry Grade (5)
+        .byte   $02 ;Game B 2nd Entry Grade (7)
+        .byte   $01 ;Game B 3rd Entry Grade (8)
         .byte   $00 ;unused fourth level
         .byte   $FF
 
@@ -5831,13 +5813,8 @@ type_a_ending_nametable:
 .segment        "unreferenced_data1": absolute
 
 unreferenced_data1:
-.if PAL = 1
-        .incbin "data/unreferenced_data1_pal.bin"
-.elseif NWC = 1
-        .include "data/unreferenced_data1_nwc.asm"
-.else
-        .incbin "data/unreferenced_data1.bin"
-.endif
+; TGM: the original filler data here was never referenced; the space now
+; holds the TGM code that does not fit in unreferenced_data4.
 
 ; End of "unreferenced_data1" segment
 .code
@@ -7680,7 +7657,7 @@ music_endings_noiseScript:
 
 .segment        "unreferenced_data4": absolute
 
-.include "data/unreferenced_data4.asm"
+.include "tgm.asm"                    ; TGM ruleset (replaces unreferenced filler data)
 
 ; End of "unreferenced_data4" segment
 .code
